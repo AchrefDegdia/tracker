@@ -1,44 +1,27 @@
-def gv
-
 pipeline {
     agent any
-    parameters {
-        choice(name: 'VERSION', choices: ['1.1.0', '1.2.0', '1.3.0'], description: '')
-        booleanParam(name: 'executeTests', defaultValue: true, description: '')
-    }
     stages {
-        stage("init") {
+        stage('git repo & clean') {
             steps {
-                script {
-                   gv = load "script.groovy" 
-                }
+               bat "rmdir  /s /q TicketBookingServiceJunitTesting"
+                bat "git clone https://github.com/kishancs2020/TicketBookingServiceJunitTesting.git"
+                bat "mvn clean -f TicketBookingServiceJunitTesting"
             }
         }
-        stage("build") {
+        stage('install') {
             steps {
-                script {
-                    gv.buildApp()
-                }
+                bat "mvn install -f TicketBookingServiceJunitTesting"
             }
         }
-        stage("test") {
-            when {
-                expression {
-                    params.executeTests
-                }
-            }
+        stage('test') {
             steps {
-                script {
-                    gv.testApp()
-                }
+                bat "mvn test -f TicketBookingServiceJunitTesting"
             }
         }
-        stage("deploy") {
+        stage('package') {
             steps {
-                script {
-                    gv.deployApp()
-                }
+                bat "mvn package -f TicketBookingServiceJunitTesting"
             }
         }
-    }   
+    }
 }
