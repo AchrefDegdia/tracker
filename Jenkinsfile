@@ -1,21 +1,29 @@
-def commit_id
-
 pipeline {
-  stages {
-    stage("Build") {
-       steps {
-          // Just print a Hello, Pipeline to the console
-          echo "Hello, Pipeline!"
-          // Compile a Java file. This requires JDKconfiguration from Jenkins
-          javac HelloWorld.java
-          // Execute the compiled Java binary called HelloWorld. This requires JDK configuration from Jenkins
-          java HelloWorld
-          // Executes the Apache Maven commands, clean then package. This requires Apache Maven configuration from Jenkins
-          mvn clean package ./HelloPackage
-          // List the files in current directory path by executing a default shell command
-          sh "ls -ltr"
-       }
-   }
-   // And next stages if you want to define further...
- } // End of stages
-} // End of pipeline
+    agent any
+    stages {
+        stage('preparation') {
+            steps {
+                checkout scm
+                sh "git rev-parse --short HEAD > .git/commit-id"
+                script {
+                    commit_id = readFile('.git/commit-id').trim()
+                }
+            }
+        }
+        stage ('build') {
+            steps {
+                echo 'building maven workload'
+                sh "mvn clean install"
+                echo 'build complete'
+            }
+        }
+
+        stage ("image build") {
+            steps {
+                echo 'building docker image'
+                sh "docker build -t 2alinfo7/position-simulator:${commit_id} ."
+                echo 'docker image built'
+            }
+        }
+    }
+}
