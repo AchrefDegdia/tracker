@@ -1,3 +1,5 @@
+def commit_id
+
 pipeline {
     agent any
     stages {
