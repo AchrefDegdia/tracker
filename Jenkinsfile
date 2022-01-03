@@ -1,48 +1,57 @@
+def commit_id
 pipeline {
     agent any
-    environment {
-        BUILD_VERSION = "${BRANCH_NAME}-${BUILD_NUMBER}"
-    }
     stages {
-        stage('Setup') {
+        stage('preparation') {
             steps {
-                sh 'docker build -t here-tracking-js .'
+                checkout scm
+                sh "git rev-parse --short HEAD > .git/commit-id"
+                script {
+                    commit_id = readFile('.git/commit-id').trim()
+                }
             }
         }
-        stage('Build') {
+        stage ('code quality') {
             steps {
-                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run dev'
-                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run build'
-                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js chown -R `id -u`:`id -g` lib'
-                archiveArtifacts artifacts: "lib/*.js", fingerprint: true
+                echo 'testing code quality'
+               sh "mvn clean verify sonar:sonar \
+                    -Dsonar.projectKey=position-similator \
+                    -Dsonar.host.url=http://localhost:9000 \
+                    -Dsonar.login=e66288d4bc6cf8bc61e91f0e79085ac9e32b9097"
+                echo 'code quality test complete'
             }
         }
-        stage('Test'){
+        stage ('build') {
             steps {
-                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run lint -- -f checkstyle -o lint_result.xml'
-                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js chown `id -u`:`id -g` lint_result.xml'
-                checkstyle canComputeNew: false, defaultEncoding: '', healthy: '', pattern: "**/lint_result.xml", unHealthy: ''
-                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run test'
+                echo 'building maven workload'
+                sh "mvn clean install"
+                echo 'build complete'
             }
         }
-    }
-    post {
-        always {
-            echo 'Cleanup'
-            step([$class: 'WsCleanup'])
-            sh 'docker rmi `docker images -q --filter "dangling=true"` || true'
+
+        stage ("image build") {
+            steps {
+                echo 'building docker image'
+                sh "docker login docker.io"
+                sh "docker build -t issambits/position-simulator:${commit_id} ."
+                echo 'docker image built'
+            }
         }
-        success {
-            echo 'Success!!!'
+        stage ("image push") {
+            steps {
+                echo 'pushing docker image'
+                sh "docker push issambits/position-simulator:${commit_id} "
+                echo 'docker image pushed'
+            }
         }
-        failure {
-            echo 'Failure ;('
-        }
-        unstable {
-            echo 'Unstable'
-        }
-        changed {
-            echo 'State changed'
+        stage('deploy') {
+            steps {
+                sh "sed -i -r 's|richardchesterwood/k8s-fleetman-position-simulator:release2|issambits/position-simulator:${commit_id}|' workloads.yaml"
+                sh "kubectl apply -f workloads.yaml"
+                sh "kubectl apply -f services.yaml"
+                sh "kubectl get all"
+                echo 'Deployment complete'
+            }
         }
     }
 }
