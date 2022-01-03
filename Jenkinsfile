@@ -1,30 +1,48 @@
-def commit_id
 pipeline {
     agent any
+    environment {
+        BUILD_VERSION = "${BRANCH_NAME}-${BUILD_NUMBER}"
+    }
     stages {
-        stage('preparation') {
+        stage('Setup') {
             steps {
-                checkout scm
-                sh "git rev-parse --short HEAD > .git/commit-id"
-                script {
-                    commit_id = readFile('.git/commit-id').trim()
-                }
+                sh 'docker build -t here-tracking-js .'
             }
         }
-        stage ('build') {
+        stage('Build') {
             steps {
-                echo 'building maven workload'
-                sh "mvn clean install"
-                echo 'build complete'
+                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run dev'
+                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run build'
+                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js chown -R `id -u`:`id -g` lib'
+                archiveArtifacts artifacts: "lib/*.js", fingerprint: true
             }
         }
-
-        stage ("image build") {
+        stage('Test'){
             steps {
-                echo 'building docker image'
-                sh "docker build -t 2alinfo7/position-simulator:${commit_id} ."
-                echo 'docker image built'
+                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run lint -- -f checkstyle -o lint_result.xml'
+                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js chown `id -u`:`id -g` lint_result.xml'
+                checkstyle canComputeNew: false, defaultEncoding: '', healthy: '', pattern: "**/lint_result.xml", unHealthy: ''
+                sh 'docker run --rm -v /usr/src/app/node_modules -v `pwd`:/usr/src/app here-tracking-js npm run test'
             }
+        }
+    }
+    post {
+        always {
+            echo 'Cleanup'
+            step([$class: 'WsCleanup'])
+            sh 'docker rmi `docker images -q --filter "dangling=true"` || true'
+        }
+        success {
+            echo 'Success!!!'
+        }
+        failure {
+            echo 'Failure ;('
+        }
+        unstable {
+            echo 'Unstable'
+        }
+        changed {
+            echo 'State changed'
         }
     }
 }
